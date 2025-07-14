@@ -83,12 +83,23 @@ pub fn handle(allocator: Allocator, broker: *Broker, connection: Connection) voi
                 print("error appending byte to buffer: {}\n", .{err});
                 return;
             };
-            const line = buffer.items;
-            const msg = Message.parseMessage(line) catch |err| {
-                print("error parsing msg: {}\n", .{err});
-                continue;
-            };
-            print("msg parsed successfully: {}\n", .{msg});
+        }
+        const line = buffer.items;
+        const msg = Message.parseMessage(line) catch |err| {
+            print("error parsing msg: {}\n", .{err});
+            continue;
+        };
+        switch (msg) {
+            .subscribe => |m| {
+                client.addTopic(m.topic) catch return;
+                print("Subscribe message parsed successfully! Topic: {s}\n", .{m.topic});
+            },
+            .unsubscribe => |m| {
+                print("Unsubscribe message parsed successfully! Topic: {s}\n", .{m.topic});
+            },
+            .publish => |m| {
+                print("Publish message parsed successfully! Topic: {s} - Message: {s}\n", .{ m.topic, m.message });
+            },
         }
     }
 }
