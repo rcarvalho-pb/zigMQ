@@ -31,17 +31,27 @@ const Client = struct {
     }
 
     pub fn addTopic(self: *@This(), topic: []const u8) !void {
-        try self.topics.append(topic);
+        const topic_copy = try self.allocator.alloc(u8, topic.len);
+        std.mem.copyForwards(u8, topic_copy, topic);
+        try self.topics.append(topic_copy);
     }
 
     pub fn removeTopic(self: *@This(), topic: []const u8) !void {
         for (self.topics.items, 0..) |t, i| {
             if (std.ascii.eqlIgnoreCase(topic, t)) {
                 _ = self.topics.swapRemove(i);
+                self.allocator.free(t);
                 return;
             }
         }
         return ClientError.TopicNotFound;
+    }
+
+    pub fn printKeys(self: @This()) void {
+        print("Client:\n", .{});
+        for (self.topics.items, 0..) |t, i| {
+            print("Index: {d} - Topic: {s}\n", .{ i, t });
+        }
     }
 };
 
@@ -73,6 +83,7 @@ pub fn handle(allocator: Allocator, broker: *Broker, connection: Connection) voi
                         return;
                     };
                 }
+                return;
             }
 
             if (byte[0] == '\n') {
@@ -91,14 +102,54 @@ pub fn handle(allocator: Allocator, broker: *Broker, connection: Connection) voi
         };
         switch (msg) {
             .subscribe => |m| {
-                client.addTopic(m.topic) catch return;
                 print("Subscribe message parsed successfully! Topic: {s}\n", .{m.topic});
+                const topic_copy = broker.subscribe(m.topic, &client.connection) catch |err| {
+                    print("error subscribing in broker: {}\n", .{err});
+                    continue;
+                };
+                print("Topic copy: {s}\n", .{topic_copy});
+                client.addTopic(m.topic) catch |err| {
+                    print("error adding topic to client: {}\n", .{err});
+                    continue;
+                };
+                client.printKeys();
+                broker.printKeys();
+                print("Successfully subscribed to topic: {s}\n", .{m.topic});
             },
             .unsubscribe => |m| {
                 print("Unsubscribe message parsed successfully! Topic: {s}\n", .{m.topic});
+                broker.unsubscribe(m.topic, &client.connection) catch |err| {
+                    print("error unsubscribing from broker topic: {}\n", .{err});
+                    continue;
+                };
+                client.removeTopic(m.topic) catch |err| {
+                    print("error unsubscribing from client topics: {}\n", .{err});
+                    continue;
+                };
+                client.printKeys();
+                broker.printKeys();
+                print("Successfully unsubscribe from topic: {s}\n", .{m.topic});
             },
             .publish => |m| {
                 print("Publish message parsed successfully! Topic: {s} - Message: {s}\n", .{ m.topic, m.message });
+                var keys = std.ArrayList([]const u8).init(allocator);
+                var it = broker.topics.iterator();
+                while (it.next()) |entry| {
+                    keys.append(entry.key_ptr.*) catch |err| {
+                        print("error appending key: {}\n", .{err});
+                        break;
+                    };
+                }
+                for (keys.items, 0..) |k, i| {
+                    print("key: {s} - pos: {d}\n", .{ k, i });
+                }
+                broker.publish(m.topic, m.message) catch |err| {
+                    print("error publishing on topic {s}: {}\n", .{ m.topic, err });
+                    continue;
+                };
+                client.printKeys();
+                broker.printKeys();
+                print("Successfully broadcasted message [{s}] on topic [{s}]\n", .{ m.message, m.topic });
             },
         }
     }

@@ -39,13 +39,13 @@ const Topic = struct {
         for (self.subscribers.items, 0..) |c, i| {
             if (c == conn) {
                 _ = self.subscribers.swapRemove(i);
-                break;
+                return;
             }
         }
         return TopicError.ConnectionNotFound;
     }
 
-    pub fn broadcast(self: @This(), msg: []const u8) !void {
+    pub fn broadcast(self: *@This(), msg: []const u8) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
         for (self.subscribers.items) |c| {
@@ -73,27 +73,58 @@ pub const Broker = struct {
         self.topics.deinit();
     }
 
-    pub fn subscribe(self: *@This(), topic: []const u8, conn: *Connection) !void {
-        const entry = try self.topics.getOrPut(topic);
+    pub fn subscribe(self: *@This(), topic: []const u8, conn: *Connection) ![]const u8 {
+        const topic_copy = try self.allocator.dupe(u8, topic);
+        const entry = try self.topics.getOrPut(topic_copy);
+        self.printKeys();
         if (!entry.found_existing) {
-            entry.value_ptr.* = std.ArrayList(Topic).init(self.allocator);
+            entry.value_ptr.* = Topic.init(self.allocator);
+        } else {
+            self.allocator.free(topic_copy);
         }
+        self.printKeys();
         try entry.value_ptr.*.add(conn);
+        self.printKeys();
+        return topic_copy;
     }
 
     pub fn unsubscribe(self: *@This(), topic: []const u8, conn: *Connection) !void {
-        const entry = try self.topics.getOrPut(topic);
-        if (!entry.found_existing) {
-            return TopicError.TopicNotFound;
+        var t = self.topics.get(topic) orelse return TopicError.TopicNotFound;
+        try t.remove(conn);
+        if (t.subscribers.items.len == 0) {
+            defer t.deinit();
+
+            var it = self.topics.iterator();
+            var key_to_free: ?[]const u8 = null;
+            while (it.next()) |entry| {
+                if (std.mem.eql(u8, entry.key_ptr.*, topic)) {
+                    key_to_free = entry.key_ptr.*;
+                    break;
+                }
+            }
+
+            const removed = self.topics.remove(topic);
+            if (!removed) return TopicError.TopicNotFound;
+            if (key_to_free) |k| {
+                self.allocator.free(k);
+            }
         }
-        try entry.value_ptr.*.remove(conn);
+        self.printKeys();
     }
 
     pub fn publish(self: @This(), topic: []const u8, msg: []const u8) !void {
-        const entry = try self.topics.getOrPut(topic);
-        if (!entry.found_existing) {
-            return TopicError.TopicNotFound;
+        self.printKeys();
+        var t = self.topics.get(topic) orelse return TopicError.TopicNotFound;
+        try t.broadcast(msg);
+    }
+
+    pub fn printKeys(self: @This()) void {
+        print("Broker:\n", .{});
+        var it = self.topics.iterator();
+        var index: u8 = 0;
+        while (it.next()) |entry| {
+            print("Key: {s} - Index: {d}\n", .{ entry.key_ptr.*, index });
+            index += 1;
         }
-        try entry.value_ptr.*.broadcast(msg);
     }
 };
