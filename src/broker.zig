@@ -2,6 +2,7 @@ const std = @import("std");
 const Print = std.debug.print;
 
 const Allocator = std.mem.Allocator;
+const Connection = std.net.Server.Connection;
 
 const ErrorTopic = error{
     NotFound,
@@ -9,38 +10,52 @@ const ErrorTopic = error{
 };
 
 const Topic = struct {
-    subscribers: std.ArrayList([]const u8),
+    subscribers: std.ArrayList(*Connection),
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) Topic {
         return Topic{
             .allocator = allocator,
-            .subscribers = std.ArrayList([]const u8).init(allocator),
+            .subscribers = std.ArrayList(*Connection).init(allocator),
         };
     }
     pub fn deinit(self: *@This()) void {
-        for (self.subscribers.items) |sub| {
-            self.allocator.free(sub);
+        for (self.subscribers.items) |conn| {
+            conn.stream.close();
+            self.allocator.destroy(conn);
         }
         self.subscribers.deinit();
     }
-    pub fn add(self: *@This(), sub: []const u8) !void {
-        const subscriber = try self.allocator.dupe(u8, sub);
-        try self.subscribers.append(subscriber);
+    pub fn add(self: *@This(), conn: *Connection) !void {
+        const conn_copy = try self.allocator.create(Connection);
+        conn_copy.* = conn.*;
+        try self.subscribers.append(conn_copy);
     }
-    pub fn remove(self: *@This(), sub: []const u8) !void {
-        for (self.subscribers.items, 0..) |s, i| {
-            if (std.mem.eql(u8, s, sub)) {
+    pub fn remove(self: *@This(), conn: *Connection) !void {
+        for (self.subscribers.items, 0..) |c, i| {
+            if (compareConnection(c, conn)) {
                 const removed = self.subscribers.swapRemove(i);
-                self.allocator.free(removed);
+                self.allocator.destroy(removed);
                 break;
             }
         }
     }
-    pub fn print(self: @This()) void {
-        for (self.subscribers.items, 0..) |s, i| {
-            Print("\t\t{d} - {s}\n", .{ i + 1, s });
+    pub fn broadcast(self: *@This(), message: []const u8) !void {
+        var line = std.ArrayList(u8).init(self.allocator);
+        defer line.deinit();
+        try line.appendSlice(message);
+        try line.append('\n');
+        for (self.subscribers.items) |c| {
+            try c.stream.writeAll(message);
         }
+    }
+    pub fn print(self: @This()) void {
+        for (self.subscribers.items, 0..) |c, i| {
+            Print("\t\t{d} - {}\n", .{ i + 1, c });
+        }
+    }
+    pub fn compareConnection(conn1: *Connection, conn2: *Connection) bool {
+        return conn1.stream.handle == conn2.stream.handle and std.net.Address.eql(conn1.address, conn2.address);
     }
 };
 
@@ -61,7 +76,7 @@ pub const Broker = struct {
             entry.value_ptr.*.deinit();
         }
     }
-    pub fn subscribe(self: *@This(), topic: []const u8, subscriber: []const u8) !void {
+    pub fn subscribe(self: *@This(), topic: []const u8, subscriber: *Connection) !void {
         const topic_copy = try self.allocator.dupe(u8, topic);
         const entry = try self.topics.getOrPut(topic_copy);
         if (!entry.found_existing) {
@@ -71,7 +86,7 @@ pub const Broker = struct {
         }
         try entry.value_ptr.add(subscriber);
     }
-    pub fn unsubscribe(self: *@This(), topic: []const u8, subscriber: []const u8) !void {
+    pub fn unsubscribe(self: *@This(), topic: []const u8, subscriber: *Connection) !void {
         var entry = self.topics.getEntry(topic) orelse return ErrorTopic.NotFound;
         try entry.value_ptr.remove(subscriber);
         if (entry.value_ptr.subscribers.items.len == 0) {
@@ -82,6 +97,11 @@ pub const Broker = struct {
                 self.allocator.free(topic_key);
             } else return ErrorTopic.NotRemoved;
         }
+    }
+    pub fn publish(self: *@This(), topic: []const u8, message: []const u8) !void {
+        var entry = self.topics.getEntry(topic) orelse return ErrorTopic.NotFound;
+        Print("Publishing on topic: '{s}'\n", .{topic});
+        try entry.value_ptr.broadcast(message);
     }
     pub fn print(self: @This()) void {
         var it = self.topics.iterator();

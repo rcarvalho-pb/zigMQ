@@ -11,11 +11,11 @@ const Thread = std.Thread;
 const PORT = 8080;
 
 pub fn runServer(allocator: Allocator, broker: *Broker) !void {
-    const addr = try net.Address.resolveIp("127.0.0.1", PORT);
+    var addr = try net.Address.resolveIp("127.0.0.1", PORT);
     var srv = try addr.listen(.{ .reuse_address = true });
     Print("server started on port [{d}]\n", .{PORT});
     while (true) {
-        const conn = try srv.accept();
+        const conn = &try srv.accept();
         var ip_buf: [40]u8 = undefined;
         const ip = formatIp(conn.address, ip_buf[0..]);
         Print("New client connected on: {s}:{d}\n", .{ ip, conn.address.getPort() });

@@ -8,7 +8,8 @@ const ParseIP = @import("tcp_server.zig").formatIp;
 const Allocator = std.mem.Allocator;
 const Connection = std.net.Server.Connection;
 
-pub fn handle(allocator: Allocator, broker: *Broker, connection: Connection) void {
+pub fn handle(allocator: Allocator, broker: *Broker, connection: *const Connection) void {
+    var conn = connection.*;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const arena_allocator = arena.allocator();
@@ -17,13 +18,13 @@ pub fn handle(allocator: Allocator, broker: *Broker, connection: Connection) voi
         var buf = std.ArrayList(u8).init(arena_allocator);
         var byte: [1]u8 = undefined;
         while (true) {
-            const bytes_read = connection.stream.read(&byte) catch |err| {
+            const bytes_read = conn.stream.read(&byte) catch |err| {
                 Print("error reading byte: {}\n", .{err});
                 return;
             };
             if (bytes_read == 0) {
                 var ip_buffer: [40]u8 = undefined;
-                Print("Client disconnected from: {s}:{d}\n", .{ ParseIP(connection.address, ip_buffer[0..]), connection.address.getPort() });
+                Print("Client disconnected from: {s}:{d}\n", .{ ParseIP(conn.address, ip_buffer[0..]), connection.address.getPort() });
                 return;
             }
             if (byte[0] == '\n') {
@@ -40,21 +41,29 @@ pub fn handle(allocator: Allocator, broker: *Broker, connection: Connection) voi
         }
         const command = ParseMessage(buf.items) catch |err| {
             Print("error parsing command: {}\n", .{err});
-            return;
+            continue;
         };
         switch (command) {
             .subscribe => |s| {
-                Print("Command parsed successfully: Topic {s} - Subscriber {s}\n", .{ s.topic, s.subscriber });
-                broker.subscribe(s.topic, s.subscriber) catch |err| {
+                Print("Subscribe command parsed successfully: Topic {s}\n", .{s.topic});
+                broker.subscribe(s.topic, &conn) catch |err| {
                     Print("error subscribing on [{s}]: {}\n", .{ s.topic, err });
-                    return;
+                    continue;
                 };
             },
             .unsubscribe => |s| {
-                Print("Command parsed successfully: Topic {s} - Subscriber {s}\n", .{ s.topic, s.subscriber });
-                broker.unsubscribe(s.topic, s.subscriber) catch |err| {
+                Print("Unsubscribe command parsed successfully: Topic {s}\n", .{s.topic});
+                broker.unsubscribe(s.topic, &conn) catch |err| {
                     Print("error unsubscribing on [{s}]: {}\n", .{ s.topic, err });
-                    return;
+                    continue;
+                };
+            },
+            .publish => |c| {
+                Print("Publish command parsed successfully: Topic {s} - Message {s}\n", .{ c.topic, c.message });
+                broker.publish(c.topic, c.message) catch |err| {
+                    Print("error publishing message {s} on {s}\n", .{ c.message, c.topic });
+                    Print("error: {}\n", .{err});
+                    continue;
                 };
             },
         }
