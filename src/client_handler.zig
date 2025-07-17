@@ -1,156 +1,63 @@
 const std = @import("std");
-const print = std.debug.print;
-const net = std.net;
-const Thread = std.Thread;
+const Print = std.debug.print;
+
 const Broker = @import("broker.zig").Broker;
-const Message = @import("message.zig");
+const ParseMessage = @import("message.zig").parseCommand;
+const ParseIP = @import("tcp_server.zig").formatIp;
 
 const Allocator = std.mem.Allocator;
-const Connection = net.Server.Connection;
-
-const ClientError = error{
-    TopicNotFound,
-};
-
-const Client = struct {
-    topics: std.ArrayList([]const u8),
-    connection: Connection,
-    allocator: Allocator,
-
-    pub fn init(allocator: Allocator, connection: Connection) Client {
-        return Client{
-            .allocator = allocator,
-            .connection = connection,
-            .topics = std.ArrayList([]const u8).init(allocator),
-        };
-    }
-
-    pub fn deinit(self: *@This()) void {
-        self.topics.deinit();
-        self.connection.stream.close();
-    }
-
-    pub fn addTopic(self: *@This(), topic: []const u8) !void {
-        const topic_copy = try self.allocator.alloc(u8, topic.len);
-        std.mem.copyForwards(u8, topic_copy, topic);
-        try self.topics.append(topic_copy);
-    }
-
-    pub fn removeTopic(self: *@This(), topic: []const u8) !void {
-        for (self.topics.items, 0..) |t, i| {
-            if (std.ascii.eqlIgnoreCase(topic, t)) {
-                _ = self.topics.swapRemove(i);
-                self.allocator.free(t);
-                return;
-            }
-        }
-        return ClientError.TopicNotFound;
-    }
-
-    pub fn printKeys(self: @This()) void {
-        print("Client:\n", .{});
-        for (self.topics.items, 0..) |t, i| {
-            print("Index: {d} - Topic: {s}\n", .{ i, t });
-        }
-    }
-};
+const Connection = std.net.Server.Connection;
 
 pub fn handle(allocator: Allocator, broker: *Broker, connection: Connection) void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-
     const arena_allocator = arena.allocator();
-    var client = Client.init(arena_allocator, connection);
+
     while (true) {
-        var buffer = std.ArrayList(u8).init(arena_allocator);
-        defer buffer.deinit();
+        var buf = std.ArrayList(u8).init(arena_allocator);
         var byte: [1]u8 = undefined;
         while (true) {
             const bytes_read = connection.stream.read(&byte) catch |err| {
-                print("err reading byte: {}\n", .{err});
+                Print("error reading byte: {}\n", .{err});
                 return;
             };
-
             if (bytes_read == 0) {
-                print("cliente disconnected!\n", .{});
-                for (client.topics.items) |t| {
-                    broker.unsubscribe(t, &client.connection) catch |err| {
-                        print("error unsubscribing from topic {s}: {}\n", .{ t, err });
-                        return;
-                    };
-                    client.removeTopic(t) catch |err| {
-                        print("error unsubscribing from topic {s}: {}\n", .{ t, err });
-                        return;
-                    };
-                }
+                var ip_buffer: [40]u8 = undefined;
+                Print("Client disconnected from: {s}:{d}\n", .{ ParseIP(connection.address, ip_buffer[0..]), connection.address.getPort() });
                 return;
             }
-
             if (byte[0] == '\n') {
                 break;
             }
-
-            buffer.append(byte[0]) catch |err| {
-                print("error appending byte to buffer: {}\n", .{err});
+            buf.append(byte[0]) catch |err| {
+                Print("error appending byte: {}\n", .{err});
                 return;
             };
+            if (buf.items.len == 0) {
+                std.debug.print("Conexão vazia, encerrando.\n", .{});
+                break;
+            }
         }
-        const line = buffer.items;
-        const msg = Message.parseMessage(line) catch |err| {
-            print("error parsing msg: {}\n", .{err});
-            continue;
+        const command = ParseMessage(buf.items) catch |err| {
+            Print("error parsing command: {}\n", .{err});
+            return;
         };
-        switch (msg) {
-            .subscribe => |m| {
-                print("Subscribe message parsed successfully! Topic: {s}\n", .{m.topic});
-                const topic_copy = broker.subscribe(m.topic, &client.connection) catch |err| {
-                    print("error subscribing in broker: {}\n", .{err});
-                    continue;
+        switch (command) {
+            .subscribe => |s| {
+                Print("Command parsed successfully: Topic {s} - Subscriber {s}\n", .{ s.topic, s.subscriber });
+                broker.subscribe(s.topic, s.subscriber) catch |err| {
+                    Print("error subscribing on [{s}]: {}\n", .{ s.topic, err });
+                    return;
                 };
-                print("Topic copy: {s}\n", .{topic_copy});
-                client.addTopic(m.topic) catch |err| {
-                    print("error adding topic to client: {}\n", .{err});
-                    continue;
-                };
-                client.printKeys();
-                broker.printKeys();
-                print("Successfully subscribed to topic: {s}\n", .{m.topic});
             },
-            .unsubscribe => |m| {
-                print("Unsubscribe message parsed successfully! Topic: {s}\n", .{m.topic});
-                broker.unsubscribe(m.topic, &client.connection) catch |err| {
-                    print("error unsubscribing from broker topic: {}\n", .{err});
-                    continue;
+            .unsubscribe => |s| {
+                Print("Command parsed successfully: Topic {s} - Subscriber {s}\n", .{ s.topic, s.subscriber });
+                broker.unsubscribe(s.topic, s.subscriber) catch |err| {
+                    Print("error unsubscribing on [{s}]: {}\n", .{ s.topic, err });
+                    return;
                 };
-                client.removeTopic(m.topic) catch |err| {
-                    print("error unsubscribing from client topics: {}\n", .{err});
-                    continue;
-                };
-                client.printKeys();
-                broker.printKeys();
-                print("Successfully unsubscribe from topic: {s}\n", .{m.topic});
-            },
-            .publish => |m| {
-                print("Publish message parsed successfully! Topic: {s} - Message: {s}\n", .{ m.topic, m.message });
-                var keys = std.ArrayList([]const u8).init(allocator);
-                var it = broker.topics.iterator();
-                while (it.next()) |entry| {
-                    keys.append(entry.key_ptr.*) catch |err| {
-                        print("error appending key: {}\n", .{err});
-                        break;
-                    };
-                }
-                for (keys.items, 0..) |k, i| {
-                    print("key: {s} - pos: {d}\n", .{ k, i });
-                }
-                broker.publish(m.topic, m.message) catch |err| {
-                    print("error publishing on topic {s}: {}\n", .{ m.topic, err });
-                    continue;
-                };
-                client.printKeys();
-                broker.printKeys();
-                print("Successfully broadcasted message [{s}] on topic [{s}]\n", .{ m.message, m.topic });
             },
         }
+        broker.print();
     }
 }

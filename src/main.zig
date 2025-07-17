@@ -1,14 +1,15 @@
 const std = @import("std");
-const print = std.debug.print;
+const Print = std.debug.print;
 
 const Broker = @import("broker.zig").Broker;
-const tcpServer = @import("tcp_server.zig");
+const ParseMessage = @import("message.zig").parseCommand;
+const RunServer = @import("tcp_server.zig").runServer;
+
+const Allocator = std.mem.Allocator;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = std.heap.page_allocator;
     var broker = Broker.init(allocator);
-    defer broker.deinit();
-    try tcpServer.run_server(allocator, &broker);
+
+    try RunServer(allocator, &broker);
 }

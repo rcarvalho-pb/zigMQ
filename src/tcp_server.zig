@@ -1,18 +1,39 @@
 const std = @import("std");
 const net = std.net;
-const print = std.debug.print;
-const Allocator = std.mem.Allocator;
-const Broker = @import("broker.zig").Broker;
-const Thread = std.Thread;
-const clientHandler = @import("client_handler.zig");
+const Print = std.debug.print;
 
-pub fn run_server(allocator: Allocator, broker: *Broker) !void {
-    const addr = try net.Address.resolveIp("127.0.0.1", 8080);
+const Handle = @import("client_handler.zig").handle;
+const Broker = @import("broker.zig").Broker;
+
+const Allocator = std.mem.Allocator;
+const Thread = std.Thread;
+
+const PORT = 8080;
+
+pub fn runServer(allocator: Allocator, broker: *Broker) !void {
+    const addr = try net.Address.resolveIp("127.0.0.1", PORT);
     var srv = try addr.listen(.{ .reuse_address = true });
-    print("zigMQ started on port: [{s}]\n", .{"8080"});
+    Print("server started on port [{d}]\n", .{PORT});
     while (true) {
-        var conn = try srv.accept();
-        print("new client connected on port: {d}\n", .{conn.address.getPort()});
-        _ = try Thread.spawn(.{}, clientHandler.handle, .{ allocator, broker, conn });
+        const conn = try srv.accept();
+        var ip_buf: [40]u8 = undefined;
+        const ip = formatIp(conn.address, ip_buf[0..]);
+        Print("New client connected on: {s}:{d}\n", .{ ip, conn.address.getPort() });
+        _ = try Thread.spawn(.{}, Handle, .{ allocator, broker, conn });
     }
+}
+
+pub fn formatIp(addr: net.Address, buffer: []u8) []const u8 {
+    const ip_bytes = blk: {
+        var out: [4]u8 = undefined;
+        std.mem.writeInt(u32, &out, addr.in.sa.addr, .little);
+        break :blk out;
+    };
+    const result = std.fmt.bufPrint(buffer, "{}.{}.{}.{}", .{
+        ip_bytes[0],
+        ip_bytes[1],
+        ip_bytes[2],
+        ip_bytes[3],
+    }) catch return "[format error]";
+    return result;
 }

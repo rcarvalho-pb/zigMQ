@@ -1,55 +1,45 @@
 const std = @import("std");
-const print = std.debug.print;
-const net = std.net;
-const Connection = net.Server.Connection;
-const Thread = std.Thread;
+const Print = std.debug.print;
+
 const Allocator = std.mem.Allocator;
 
-const TopicError = error{
-    TopicNotFound,
-    ConnectionNotFound,
+const ErrorTopic = error{
+    NotFound,
+    NotRemoved,
 };
 
 const Topic = struct {
-    subscribers: std.ArrayList(*Connection),
-    mutex: Thread.Mutex,
+    subscribers: std.ArrayList([]const u8),
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) Topic {
         return Topic{
             .allocator = allocator,
-            .mutex = Thread.Mutex{},
-            .subscribers = std.ArrayList(*Connection).init(allocator),
+            .subscribers = std.ArrayList([]const u8).init(allocator),
         };
     }
-
     pub fn deinit(self: *@This()) void {
+        for (self.subscribers.items) |sub| {
+            self.allocator.free(sub);
+        }
         self.subscribers.deinit();
     }
-
-    pub fn add(self: *@This(), conn: *Connection) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        try self.subscribers.append(conn);
+    pub fn add(self: *@This(), sub: []const u8) !void {
+        const subscriber = try self.allocator.dupe(u8, sub);
+        try self.subscribers.append(subscriber);
     }
-
-    pub fn remove(self: *@This(), conn: *Connection) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        for (self.subscribers.items, 0..) |c, i| {
-            if (c == conn) {
-                _ = self.subscribers.swapRemove(i);
-                return;
+    pub fn remove(self: *@This(), sub: []const u8) !void {
+        for (self.subscribers.items, 0..) |s, i| {
+            if (std.mem.eql(u8, s, sub)) {
+                const removed = self.subscribers.swapRemove(i);
+                self.allocator.free(removed);
+                break;
             }
         }
-        return TopicError.ConnectionNotFound;
     }
-
-    pub fn broadcast(self: *@This(), msg: []const u8) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        for (self.subscribers.items) |c| {
-            try c.stream.writeAll(msg);
+    pub fn print(self: @This()) void {
+        for (self.subscribers.items, 0..) |s, i| {
+            Print("\t\t{d} - {s}\n", .{ i + 1, s });
         }
     }
 };
@@ -64,67 +54,40 @@ pub const Broker = struct {
             .topics = std.StringHashMap(Topic).init(allocator),
         };
     }
-
     pub fn deinit(self: *@This()) void {
         var it = self.topics.iterator();
         while (it.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
             entry.value_ptr.*.deinit();
         }
-        self.topics.deinit();
     }
-
-    pub fn subscribe(self: *@This(), topic: []const u8, conn: *Connection) ![]const u8 {
+    pub fn subscribe(self: *@This(), topic: []const u8, subscriber: []const u8) !void {
         const topic_copy = try self.allocator.dupe(u8, topic);
         const entry = try self.topics.getOrPut(topic_copy);
-        self.printKeys();
         if (!entry.found_existing) {
             entry.value_ptr.* = Topic.init(self.allocator);
         } else {
             self.allocator.free(topic_copy);
         }
-        self.printKeys();
-        try entry.value_ptr.*.add(conn);
-        self.printKeys();
-        return topic_copy;
+        try entry.value_ptr.add(subscriber);
     }
-
-    pub fn unsubscribe(self: *@This(), topic: []const u8, conn: *Connection) !void {
-        var t = self.topics.get(topic) orelse return TopicError.TopicNotFound;
-        try t.remove(conn);
-        if (t.subscribers.items.len == 0) {
-            defer t.deinit();
-
-            var it = self.topics.iterator();
-            var key_to_free: ?[]const u8 = null;
-            while (it.next()) |entry| {
-                if (std.mem.eql(u8, entry.key_ptr.*, topic)) {
-                    key_to_free = entry.key_ptr.*;
-                    break;
-                }
-            }
-
-            const removed = self.topics.remove(topic);
-            if (!removed) return TopicError.TopicNotFound;
-            if (key_to_free) |k| {
-                self.allocator.free(k);
-            }
+    pub fn unsubscribe(self: *@This(), topic: []const u8, subscriber: []const u8) !void {
+        var entry = self.topics.getEntry(topic) orelse return ErrorTopic.NotFound;
+        try entry.value_ptr.remove(subscriber);
+        if (entry.value_ptr.subscribers.items.len == 0) {
+            const topic_key = entry.key_ptr.*;
+            var value_ptr = entry.value_ptr.*;
+            if (self.topics.remove(topic_key)) {
+                value_ptr.deinit();
+                self.allocator.free(topic_key);
+            } else return ErrorTopic.NotRemoved;
         }
-        self.printKeys();
     }
-
-    pub fn publish(self: @This(), topic: []const u8, msg: []const u8) !void {
-        self.printKeys();
-        var t = self.topics.get(topic) orelse return TopicError.TopicNotFound;
-        try t.broadcast(msg);
-    }
-
-    pub fn printKeys(self: @This()) void {
-        print("Broker:\n", .{});
+    pub fn print(self: @This()) void {
         var it = self.topics.iterator();
-        var index: u8 = 0;
-        while (it.next()) |entry| {
-            print("Key: {s} - Index: {d}\n", .{ entry.key_ptr.*, index });
-            index += 1;
+        while (it.next()) |t| {
+            Print("\tTopic: {s}\n", .{t.key_ptr.*});
+            t.value_ptr.print();
         }
     }
 };

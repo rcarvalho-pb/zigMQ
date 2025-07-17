@@ -1,51 +1,43 @@
 const std = @import("std");
-const print = std.debug.print;
+const Print = std.debug.print;
 
-const MsgError = error{
-    UnkownMsgType,
-    InvalidInputCommand,
+const ErrorCommand = error{
+    NotFound,
+    Invalid,
 };
 
-const MsgType = enum {
+const CommandType = enum {
     subscribe,
     unsubscribe,
-    publish,
 };
 
-const Message = union(MsgType) { subscribe: struct {
-    topic: []const u8,
-}, unsubscribe: struct {
-    topic: []const u8,
-}, publish: struct {
-    topic: []const u8,
-    message: []const u8,
-} };
+const Command = union(CommandType) {
+    subscribe: struct {
+        topic: []const u8,
+        subscriber: []const u8,
+    },
+    unsubscribe: struct {
+        topic: []const u8,
+        subscriber: []const u8,
+    },
+};
 
-pub fn parseMessage(message: []const u8) !Message {
-    var it = std.mem.tokenizeAny(u8, message, " ");
-    var buf: [13]u8 = undefined;
-    const raw = it.next() orelse return MsgError.InvalidInputCommand;
-    const lowered = std.ascii.lowerString(&buf, raw);
-    const command = std.meta.stringToEnum(MsgType, lowered) orelse return MsgError.UnkownMsgType;
-    switch (command) {
-        .publish => {
-            const msg = Message{ .publish = .{
-                .topic = it.next() orelse return MsgError.InvalidInputCommand,
-                .message = it.rest(),
-            } };
-            return msg;
-        },
+pub fn parseCommand(line: []const u8) anyerror!Command {
+    var it = std.mem.tokenizeAny(u8, line, " ");
+    const command = it.next() orelse return ErrorCommand.Invalid;
+    const cmdType = std.meta.stringToEnum(CommandType, command) orelse return ErrorCommand.NotFound;
+    switch (cmdType) {
         .subscribe => {
-            const msg = Message{ .subscribe = .{
-                .topic = it.rest(),
+            return Command{ .subscribe = .{
+                .topic = it.next() orelse return ErrorCommand.Invalid,
+                .subscriber = it.next() orelse return ErrorCommand.Invalid,
             } };
-            return msg;
         },
         .unsubscribe => {
-            const msg = Message{ .unsubscribe = .{
-                .topic = it.rest(),
+            return Command{ .unsubscribe = .{
+                .topic = it.next() orelse return ErrorCommand.Invalid,
+                .subscriber = it.next() orelse return ErrorCommand.Invalid,
             } };
-            return msg;
         },
     }
 }
