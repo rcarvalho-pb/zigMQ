@@ -33,22 +33,26 @@ pub const Broker = struct {
         self.topics.deinit();
     }
 
-    pub fn subscribe(self: *Self, topic_name: []const u8, consumer: Consumer) BrokerError!void {
+    pub fn subscribe(self: *Self, topic_name: []const u8, consumer: Consumer) !void {
         var topic = try self.getOrCreateTopic(topic_name);
         try topic.subscribe(consumer);
     }
 
-    pub fn publish(self: *Self, topic_name: []const u8, msg: Message) BrokerError!void {
-        const topic = try self.getOrCreateTopic(topic_name);
+    pub fn publish(self: *Self, topic_name: []const u8, msg: Message) !void {
+        const topic = self.getOrCreateTopic(topic_name) catch return BrokerError.TopicNotFound;
         try topic.publish(msg);
     }
 
     fn getOrCreateTopic(self: *Self, topic_name: []const u8) !*Topic {
-        const topic_name_copy = try self.allocator.dupe(u8, topic_name);
-        if (self.topics.get(topic_name_copy)) |t| return t;
-        const new_topic = try self.allocator.create(Topic);
-        new_topic.* = Topic.init(self.allocator, topic_name_copy);
-        try self.topics.put(topic_name_copy, new_topic);
-        return new_topic;
+        const topic_copy = try self.allocator.dupe(u8, topic_name);
+        const entry = try self.topics.getOrPut(topic_copy);
+        if (!entry.found_existing) {
+            const topicPtr = try self.allocator.create(Topic);
+            topicPtr.* = Topic.init(self.allocator, topic_copy);
+            entry.value_ptr.* = topicPtr;
+        } else {
+            self.allocator.free(topic_copy);
+        }
+        return entry.value_ptr.*;
     }
 };

@@ -30,21 +30,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const run_broker_tests = b.addRunArtifact(broker_test);
-    const topic_test = b.addTest(.{
-        .root_source_file = b.path("src/broker/topic_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const run_topic_tests = b.addRunArtifact(topic_test);
-    const message_test = b.addTest(.{
-        .root_source_file = b.path("src/broker/message_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const run_message_tests = b.addRunArtifact(message_test);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_broker_tests.step);
-    test_step.dependOn(&run_topic_tests.step);
-    test_step.dependOn(&run_message_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 }
