@@ -2,8 +2,13 @@ const std = @import("std");
 
 const Topic = @import("topic.zig").Topic;
 const Consumer = @import("topic.zig").Consumer;
+const Message = @import("message.zig").Message;
 
 const Allocator = std.mem.Allocator;
+
+pub const BrokerError = error{
+    TopicNotFound,
+};
 
 pub const Broker = struct {
     allocator: Allocator,
@@ -28,9 +33,14 @@ pub const Broker = struct {
         self.topics.deinit();
     }
 
-    pub fn subscribe(self: *Self, topic_name: []const u8, consumer: Consumer) !void {
+    pub fn subscribe(self: *Self, topic_name: []const u8, consumer: Consumer) BrokerError!void {
         var topic = try self.getOrCreateTopic(topic_name);
         try topic.subscribe(consumer);
+    }
+
+    pub fn publish(self: *Self, topic_name: []const u8, msg: Message) BrokerError!void {
+        const topic = try self.getOrCreateTopic(topic_name);
+        try topic.publish(msg);
     }
 
     fn getOrCreateTopic(self: *Self, topic_name: []const u8) !*Topic {
