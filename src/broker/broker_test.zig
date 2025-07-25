@@ -92,3 +92,68 @@ test "broker publishes messages to a topic" {
     try testing.expectEqual(@as(i8, 1), writer.quantity);
     try testing.expect(writer.received);
 }
+
+test "consumer can unsubscribe from topic" {
+    const allocator = testing.allocator;
+    var broker = Broker.init(allocator);
+    defer broker.deinit();
+
+    var writer = FakeWriter{};
+    const consumer = Consumer{
+        .id = "client-1",
+        .writer = &writer,
+        .writerFn = struct {
+            pub fn call(ctx: *anyopaque, msg: Message) !void {
+                const w: *FakeWriter = @ptrCast(ctx);
+                try w.write(msg);
+            }
+        }.call,
+    };
+
+    const topic_name = "topic-unsub";
+    try broker.subscribe(topic_name, consumer);
+    try broker.unsubscribe(topic_name, consumer.id);
+
+    const msg = Message{
+        .topic = topic_name,
+        .payload = "payload test",
+        .timestamp = 1234,
+    };
+
+    try broker.publish(topic_name, msg);
+
+    try testing.expectEqual(@as(i8, 0), writer.quantity);
+    try testing.expect(!writer.received);
+}
+
+test "list topics and consumers" {
+    const allocator = testing.allocator;
+    var broker = Broker.init(allocator);
+    defer broker.deinit();
+
+    var writer = FakeWriter{};
+    const consumer = Consumer{
+        .id = "client-1",
+        .writer = &writer,
+        .writerFn = struct {
+            pub fn call(ctx: *anyopaque, msg: Message) !void {
+                const w: *FakeWriter = @ptrCast(ctx);
+                try w.write(msg);
+            }
+        }.call,
+    };
+
+    try broker.subscribe("topic-a", consumer);
+    try broker.subscribe("topic-b", consumer);
+
+    const topics = try broker.listTopics();
+    defer topics.deinit();
+
+    try testing.expectEqual(@as(usize, 2), topics.items.len);
+
+    const consumers = try broker.listConsumers("topic-a");
+    defer consumers.deinit();
+
+    try testing.expectEqual(@as(usize, 1), consumers.items.len);
+    try testing.expectEqualStrings("client-1", consumers.items[0]);
+}

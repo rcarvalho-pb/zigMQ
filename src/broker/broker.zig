@@ -38,9 +38,29 @@ pub const Broker = struct {
         try topic.subscribe(consumer);
     }
 
+    pub fn unsubscribe(self: *Self, topic_name: []const u8, consumer_id: []const u8) !void {
+        const topic = self.topics.get(topic_name) orelse return BrokerError.TopicNotFound;
+        topic.unsubscribe(consumer_id);
+    }
+
     pub fn publish(self: *Self, topic_name: []const u8, msg: Message) !void {
         const topic = self.getOrCreateTopic(topic_name) catch return BrokerError.TopicNotFound;
         try topic.publish(msg);
+    }
+
+    pub fn listTopics(self: Self) !std.ArrayList([]const u8) {
+        var list = std.ArrayList([]const u8).init(self.allocator);
+        var it = self.topics.iterator();
+        while (it.next()) |entry| {
+            try list.append(entry.key_ptr.*);
+        }
+        return list;
+    }
+
+    pub fn listConsumers(self: Self, topic_name: []const u8) !std.ArrayList([]const u8) {
+        const topic = self.topics.get(topic_name) orelse return BrokerError.TopicNotFound;
+        const list = try topic.listConsumers();
+        return list;
     }
 
     fn getOrCreateTopic(self: *Self, topic_name: []const u8) !*Topic {

@@ -26,8 +26,10 @@ pub const Topic = struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        for (self.messages.items, self.consumers.items) |m, c| {
+        for (self.messages.items) |m| {
             self.allocator.destroy(m);
+        }
+        for (self.consumers.items) |c| {
             self.allocator.destroy(c);
         }
         self.messages.deinit();
@@ -38,6 +40,24 @@ pub const Topic = struct {
         const consumerPtr = try self.allocator.create(Consumer);
         consumerPtr.* = consumer;
         try self.consumers.append(consumerPtr);
+    }
+
+    pub fn unsubscribe(self: *@This(), consumer_id: []const u8) void {
+        for (self.consumers.items, 0..) |c, i| {
+            if (std.mem.eql(u8, c.id, consumer_id)) {
+                const consumer = self.consumers.swapRemove(i);
+                self.allocator.destroy(consumer);
+                break;
+            }
+        }
+    }
+
+    pub fn listConsumers(self: @This()) !std.ArrayList([]const u8) {
+        var list = std.ArrayList([]const u8).init(self.allocator);
+        for (self.consumers.items) |c| {
+            try list.append(c.id);
+        }
+        return list;
     }
 
     pub fn publish(self: *@This(), msg: Message) !void {
