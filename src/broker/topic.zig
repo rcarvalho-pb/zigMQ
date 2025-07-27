@@ -14,6 +14,25 @@ pub const Consumer = struct {
     id: []const u8,
     writer: *anyopaque,
     writerFn: *const fn (ctx: *anyopaque, msg: Message) anyerror!void,
+    queue: ArrayList(*Message),
+
+    const Self = @This();
+
+    pub fn init(allocator: Allocator, id: []const u8, writer: *anyopaque, writerFn: *const fn (*anyopaque, Message) anyerror!void) !Consumer {
+        return Consumer{
+            .id = id,
+            .writer = writer,
+            .writerFn = writerFn,
+            .queue = std.ArrayList(*Message).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        for (self.queue.items) |m| {
+            self.queue.allocator.destroy(m);
+        }
+        self.queue.deinit();
+    }
 };
 
 pub const Topic = struct {
@@ -64,6 +83,7 @@ pub const Topic = struct {
             self.allocator.destroy(m);
         }
         for (self.consumers.items) |c| {
+            c.deinit();
             self.allocator.destroy(c);
         }
         if (self.file) |f| {
@@ -75,7 +95,7 @@ pub const Topic = struct {
 
     pub fn subscribe(self: *@This(), consumer: Consumer) !void {
         const consumerPtr = try self.allocator.create(Consumer);
-        consumerPtr.* = consumer;
+        consumerPtr.* = try Consumer.init(self.allocator, consumer.id, consumer.writer, consumer.writerFn);
         try self.consumers.append(consumerPtr);
     }
 
@@ -103,6 +123,9 @@ pub const Topic = struct {
         try self.messages.append(msgPtr);
         for (self.consumers.items) |c| {
             try c.writerFn(c.writer, msg);
+        }
+        for (self.consumers.items) |c| {
+            try c.queue.append(c);
         }
         if (self.persistence == .file) {
             if (self.file) |f| {
