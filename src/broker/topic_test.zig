@@ -16,7 +16,7 @@ const FakeWriter = struct {
 test "subscribe and publish" {
     const allocator = testing.allocator;
 
-    var topic = Topic.init(allocator, "eventos");
+    var topic = try Topic.init(allocator, "eventos", null, null);
     defer topic.deinit();
 
     var writer = FakeWriter{};

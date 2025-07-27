@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Topic = @import("topic.zig").Topic;
+const PersistenceMode = @import("topic.zig").PersistenceMode;
 const Consumer = @import("topic.zig").Consumer;
 const Message = @import("message.zig").Message;
 
@@ -33,8 +34,16 @@ pub const Broker = struct {
         self.topics.deinit();
     }
 
+    pub fn createTopic(self: *Self, topic_name: []const u8, persistenceMode: ?PersistenceMode, path_file: ?[]const u8) !*Topic {
+        const topic_name_copy = try self.allocator.dupe(u8, topic_name);
+        const topicPtr = try self.allocator.create(Topic);
+        topicPtr.* = try Topic.init(self.allocator, topic_name_copy, persistenceMode, path_file);
+        try self.topics.put(topic_name_copy, topicPtr);
+        return topicPtr;
+    }
+
     pub fn subscribe(self: *Self, topic_name: []const u8, consumer: Consumer) !void {
-        var topic = try self.getOrCreateTopic(topic_name);
+        var topic = self.topics.get(topic_name) orelse return BrokerError.TopicNotFound;
         try topic.subscribe(consumer);
     }
 
@@ -44,7 +53,7 @@ pub const Broker = struct {
     }
 
     pub fn publish(self: *Self, topic_name: []const u8, msg: Message) !void {
-        const topic = self.getOrCreateTopic(topic_name) catch return BrokerError.TopicNotFound;
+        const topic = self.topics.get(topic_name) orelse return BrokerError.TopicNotFound;
         try topic.publish(msg);
     }
 
@@ -61,18 +70,5 @@ pub const Broker = struct {
         const topic = self.topics.get(topic_name) orelse return BrokerError.TopicNotFound;
         const list = try topic.listConsumers();
         return list;
-    }
-
-    fn getOrCreateTopic(self: *Self, topic_name: []const u8) !*Topic {
-        const topic_copy = try self.allocator.dupe(u8, topic_name);
-        const entry = try self.topics.getOrPut(topic_copy);
-        if (!entry.found_existing) {
-            const topicPtr = try self.allocator.create(Topic);
-            topicPtr.* = Topic.init(self.allocator, topic_copy);
-            entry.value_ptr.* = topicPtr;
-        } else {
-            self.allocator.free(topic_copy);
-        }
-        return entry.value_ptr.*;
     }
 };

@@ -4,6 +4,11 @@ const ArrayList = std.ArrayList;
 
 const Message = @import("message.zig").Message;
 
+pub const PersistenceMode = enum {
+    none,
+    file,
+};
+
 pub const Consumer = struct {
     id: []const u8,
     writer: *anyopaque,
@@ -15,14 +20,47 @@ pub const Topic = struct {
     name: []const u8,
     messages: ArrayList(*Message),
     consumers: ArrayList(*Consumer),
+    persistence: PersistenceMode,
+    file: ?std.fs.File = null,
 
-    pub fn init(allocator: Allocator, name: []const u8) Topic {
-        return Topic{
+    pub fn init(allocator: Allocator, name: []const u8, persistence: ?PersistenceMode, file_path: ?[]const u8) !Topic {
+        const mode = persistence orelse .none;
+        var topic = Topic{
             .allocator = allocator,
             .name = name,
             .messages = ArrayList(*Message).init(allocator),
             .consumers = ArrayList(*Consumer).init(allocator),
+            .persistence = mode,
         };
+
+        const getOrCreateFile = struct {
+            pub fn call(path: []const u8) anyerror!std.fs.File {
+                const file = std.fs.cwd().openFile(path, .{ .mode = .read_write }) catch |err| blk: {
+                    if (err == error.FileNotFound) {
+                        break :blk try std.fs.cwd().createFile(path, .{ .truncate = false, .read = false });
+                    } else {
+                        return err;
+                    }
+                };
+                return file;
+            }
+        }.call;
+
+        switch (mode) {
+            .file => {
+                if (file_path) |p| {
+                    const file = try getOrCreateFile(p);
+                    topic.file = file;
+                } else {
+                    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+                    const path = try std.fmt.bufPrint(&buffer, "logs/{s}.log", .{name});
+                    const file = try getOrCreateFile(path);
+                    topic.file = file;
+                }
+            },
+            .none => {},
+        }
+        return topic;
     }
 
     pub fn deinit(self: *@This()) void {
@@ -31,6 +69,9 @@ pub const Topic = struct {
         }
         for (self.consumers.items) |c| {
             self.allocator.destroy(c);
+        }
+        if (self.file) |f| {
+            f.close();
         }
         self.messages.deinit();
         self.consumers.deinit();
