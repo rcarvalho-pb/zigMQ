@@ -1,4 +1,5 @@
 const std = @import("std");
+const print = std.debug.print;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
@@ -23,7 +24,7 @@ pub const Topic = struct {
     persistence: PersistenceMode,
     file: ?std.fs.File = null,
 
-    pub fn init(allocator: Allocator, name: []const u8, persistence: ?PersistenceMode, file_path: ?[]const u8) !Topic {
+    pub fn init(allocator: Allocator, name: []const u8, persistence: ?PersistenceMode) !Topic {
         const mode = persistence orelse .none;
         var topic = Topic{
             .allocator = allocator,
@@ -48,15 +49,10 @@ pub const Topic = struct {
 
         switch (mode) {
             .file => {
-                if (file_path) |p| {
-                    const file = try getOrCreateFile(p);
-                    topic.file = file;
-                } else {
-                    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-                    const path = try std.fmt.bufPrint(&buffer, "logs/{s}.log", .{name});
-                    const file = try getOrCreateFile(path);
-                    topic.file = file;
-                }
+                var buffer: [std.fs.max_path_bytes]u8 = undefined;
+                const path = try std.fmt.bufPrint(&buffer, "logs/{s}.log", .{name});
+                const file = try getOrCreateFile(path);
+                topic.file = file;
             },
             .none => {},
         }
@@ -107,6 +103,17 @@ pub const Topic = struct {
         try self.messages.append(msgPtr);
         for (self.consumers.items) |c| {
             try c.writerFn(c.writer, msg);
+        }
+        if (self.persistence == .file) {
+            if (self.file) |f| {
+                const to_write = try std.fmt.allocPrint(self.allocator, "{d}|{s}|{s}\n", .{
+                    msg.timestamp,
+                    msg.topic,
+                    msg.payload,
+                });
+                defer self.allocator.free(to_write);
+                try f.writeAll(to_write);
+            }
         }
     }
 };

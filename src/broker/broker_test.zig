@@ -41,8 +41,8 @@ test "consumer can subscribe to multiple topics" {
         .timestamp = 1234567890,
     };
 
-    _ = try broker.createTopic("topic-1", null, null);
-    _ = try broker.createTopic("topic-2", null, null);
+    _ = try broker.createTopic("topic-1", null);
+    _ = try broker.createTopic("topic-2", null);
 
     try broker.subscribe("topic-1", consumer);
     try broker.subscribe("topic-2", consumer);
@@ -86,7 +86,7 @@ test "broker publishes messages to a topic" {
         .timestamp = 123,
     };
 
-    _ = try broker.createTopic(topic_name, null, null);
+    _ = try broker.createTopic(topic_name, null);
     try broker.subscribe(topic_name, consumer);
     try broker.publish(topic_name, msg);
 
@@ -115,7 +115,7 @@ test "consumer can unsubscribe from topic" {
     };
 
     const topic_name = "topic-unsub";
-    _ = try broker.createTopic(topic_name, null, null);
+    _ = try broker.createTopic(topic_name, null);
     try broker.subscribe(topic_name, consumer);
     try broker.unsubscribe(topic_name, consumer.id);
 
@@ -148,8 +148,8 @@ test "list topics and consumers" {
         }.call,
     };
 
-    _ = try broker.createTopic("topic-a", null, null);
-    _ = try broker.createTopic("topic-b", null, null);
+    _ = try broker.createTopic("topic-a", null);
+    _ = try broker.createTopic("topic-b", null);
 
     try broker.subscribe("topic-a", consumer);
     try broker.subscribe("topic-b", consumer);

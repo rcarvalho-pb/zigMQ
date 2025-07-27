@@ -34,10 +34,10 @@ pub const Broker = struct {
         self.topics.deinit();
     }
 
-    pub fn createTopic(self: *Self, topic_name: []const u8, persistenceMode: ?PersistenceMode, path_file: ?[]const u8) !*Topic {
+    pub fn createTopic(self: *Self, topic_name: []const u8, persistenceMode: ?PersistenceMode) !*Topic {
         const topic_name_copy = try self.allocator.dupe(u8, topic_name);
         const topicPtr = try self.allocator.create(Topic);
-        topicPtr.* = try Topic.init(self.allocator, topic_name_copy, persistenceMode, path_file);
+        topicPtr.* = try Topic.init(self.allocator, topic_name_copy, persistenceMode);
         try self.topics.put(topic_name_copy, topicPtr);
         return topicPtr;
     }
