@@ -24,16 +24,12 @@ test "consumer can subscribe to multiple topics" {
     var broker = Broker.init(allocator);
     defer broker.deinit();
     var writer = FakeWriter{};
-    const consumer = Consumer{
-        .id = "client-1",
-        .writer = &writer,
-        .writerFn = struct {
-            pub fn call(ctx: *anyopaque, msg: Message) !void {
-                const w: *FakeWriter = @ptrCast(ctx);
-                try w.write(msg);
-            }
-        }.call,
-    };
+    const consumer = try Consumer.init(allocator, "client-1", &writer, struct {
+        pub fn call(ctx: *anyopaque, msg: Message) !void {
+            const w: *FakeWriter = @ptrCast(ctx);
+            try w.write(msg);
+        }
+    }.call);
 
     const msg = Message{
         .topic = "topic test",
@@ -68,16 +64,12 @@ test "broker publishes messages to a topic" {
     var writer = FakeWriter{};
 
     const clientID = "client-1";
-    const consumer = Consumer{
-        .id = clientID,
-        .writer = &writer,
-        .writerFn = struct {
-            pub fn call(ctx: *anyopaque, msg: Message) !void {
-                const w: *FakeWriter = @ptrCast(ctx);
-                try w.write(msg);
-            }
-        }.call,
-    };
+    const consumer = try Consumer.init(allocator, clientID, &writer, struct {
+        pub fn call(ctx: *anyopaque, msg: Message) !void {
+            const w: *FakeWriter = @ptrCast(ctx);
+            try w.write(msg);
+        }
+    }.call);
 
     const topic_name = "topic-1";
     const msg = Message{
@@ -103,16 +95,12 @@ test "consumer can unsubscribe from topic" {
     defer broker.deinit();
 
     var writer = FakeWriter{};
-    const consumer = Consumer{
-        .id = "client-1",
-        .writer = &writer,
-        .writerFn = struct {
-            pub fn call(ctx: *anyopaque, msg: Message) !void {
-                const w: *FakeWriter = @ptrCast(ctx);
-                try w.write(msg);
-            }
-        }.call,
-    };
+    const consumer = try Consumer.init(allocator, "client-1", &writer, struct {
+        pub fn call(ctx: *anyopaque, msg: Message) !void {
+            const w: *FakeWriter = @ptrCast(ctx);
+            try w.write(msg);
+        }
+    }.call);
 
     const topic_name = "topic-unsub";
     _ = try broker.createTopic(topic_name, null);
@@ -137,16 +125,12 @@ test "list topics and consumers" {
     defer broker.deinit();
 
     var writer = FakeWriter{};
-    const consumer = Consumer{
-        .id = "client-1",
-        .writer = &writer,
-        .writerFn = struct {
-            pub fn call(ctx: *anyopaque, msg: Message) !void {
-                const w: *FakeWriter = @ptrCast(ctx);
-                try w.write(msg);
-            }
-        }.call,
-    };
+    const consumer = try Consumer.init(allocator, "client-1", &writer, struct {
+        pub fn call(ctx: *anyopaque, msg: Message) !void {
+            const w: *FakeWriter = @ptrCast(ctx);
+            try w.write(msg);
+        }
+    }.call);
 
     _ = try broker.createTopic("topic-a", null);
     _ = try broker.createTopic("topic-b", null);

@@ -22,16 +22,12 @@ test "subscribe and publish" {
 
     var writer = FakeWriter{};
 
-    const consumer = Consumer{
-        .id = "client-1",
-        .writer = &writer,
-        .writerFn = struct {
-            pub fn call(ctx: *anyopaque, msg: Message) anyerror!void {
-                const w: *FakeWriter = @ptrCast(ctx);
-                try w.write(msg);
-            }
-        }.call,
-    };
+    const consumer = try Consumer.init(allocator, "client-1", &writer, struct {
+        pub fn call(ctx: *anyopaque, msg: Message) anyerror!void {
+            const w: *FakeWriter = @ptrCast(ctx);
+            try w.write(msg);
+        }
+    }.call);
 
     try topic.subscribe(consumer);
 
@@ -86,6 +82,10 @@ test "create and topic in memory tmpDir" {
 test "create an topic and write it in default" {
     const allocator = testing.allocator;
     const topic_name = "test-topic";
+    const filename = try std.fmt.allocPrint(allocator, "{s}.log", .{topic_name});
+    defer allocator.free(filename);
+    const full_path = try std.fs.path.join(allocator, &.{ "logs", filename });
+    defer allocator.free(full_path);
     var topic = try Topic.init(allocator, topic_name, .file);
     defer topic.deinit();
 
@@ -97,10 +97,10 @@ test "create an topic and write it in default" {
 
     try topic.publish(msg);
 
-    const reopenned = try std.fs.cwd().openFile("logs/test-topic.log", .{ .mode = .read_only });
+    const reopenned = try std.fs.cwd().openFile(full_path, .{ .mode = .read_only });
     defer reopenned.close();
     defer {
-        std.fs.cwd().deleteFile("logs/test-topic.log") catch |err| {
+        std.fs.cwd().deleteFile(full_path) catch |err| {
             print("error deleting test file: {}\n", .{err});
         };
     }

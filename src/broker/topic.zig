@@ -28,9 +28,9 @@ pub const Consumer = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        for (self.queue.items) |m| {
-            self.queue.allocator.destroy(m);
-        }
+        // for (self.queue.items) |m| {
+        //     self.queue.allocator.destroy(m);
+        // }
         self.queue.deinit();
     }
 };
@@ -68,8 +68,20 @@ pub const Topic = struct {
 
         switch (mode) {
             .file => {
-                var buffer: [std.fs.max_path_bytes]u8 = undefined;
-                const path = try std.fmt.bufPrint(&buffer, "logs/{s}.log", .{name});
+                const dir_path = "logs";
+                const filename = try std.fmt.allocPrint(allocator, "{s}.log", .{name});
+                defer allocator.free(filename);
+                const path = try std.fs.path.join(allocator, &.{ dir_path, filename });
+                defer allocator.free(path);
+                var dir = std.fs.cwd().openDir(dir_path, .{}) catch |err| blk: {
+                    if (err == error.FileNotFound) {
+                        try std.fs.cwd().makeDir(dir_path);
+                        break :blk try std.fs.cwd().openDir(dir_path, .{});
+                    } else {
+                        return err;
+                    }
+                };
+                dir.close();
                 const file = try getOrCreateFile(path);
                 topic.file = file;
             },
@@ -123,9 +135,7 @@ pub const Topic = struct {
         try self.messages.append(msgPtr);
         for (self.consumers.items) |c| {
             try c.writerFn(c.writer, msg);
-        }
-        for (self.consumers.items) |c| {
-            try c.queue.append(c);
+            try c.queue.append(msgPtr);
         }
         if (self.persistence == .file) {
             if (self.file) |f| {
