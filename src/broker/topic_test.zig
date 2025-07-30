@@ -176,11 +176,21 @@ test "replay previously pusblished messages" {
         .writer = &buffer,
         .writerFn = struct {
             pub fn call(ctx: *anyopaque, msg: Message) anyerror!void {
-                const list: *std.ArrayList(Message) = @ptrCast(ctx);
+                const list: *std.ArrayList(Message) = @ptrCast(@alignCast(ctx));
                 try list.append(msg);
+                for (list.items) |m| {
+                    print("Message in list: {s}\n", .{m.topic});
+                }
             }
         }.call,
         .queue = std.ArrayList(*Message).init(allocator),
     };
     defer consumer.deinit();
+
+    try topic.subscribe(consumer);
+    try topic.replay("replayer");
+
+    try testing.expectEqual(@as(usize, 2), buffer.items.len);
+    try testing.expectEqualStrings("first", buffer.items[0].payload);
+    try testing.expectEqualStrings("second", buffer.items[1].payload);
 }

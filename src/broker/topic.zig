@@ -22,20 +22,23 @@ pub const Consumer = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: Allocator, id: []const u8, writer: *anyopaque, writerFn: *const fn (*anyopaque, Message) anyerror!void) !Consumer {
-        return Consumer{
+    pub fn init(allocator: Allocator, id: []const u8, writer: *anyopaque, writerFn: *const fn (*anyopaque, Message) anyerror!void) !*Consumer {
+        const self = try allocator.create(Consumer);
+        errdefer allocator.destroy(self);
+
+        self.* = Consumer{
             .id = id,
             .writer = writer,
             .writerFn = writerFn,
             .queue = std.ArrayList(*Message).init(allocator),
         };
+
+        return self;
     }
 
-    pub fn deinit(self: *Self) void {
-        // for (self.queue.items) |m| {
-        //     self.queue.allocator.destroy(m);
-        // }
+    pub fn deinit(self: *Self, allocator: Allocator) void {
         self.queue.deinit();
+        allocator.destroy(self);
     }
 
     pub fn flush(self: *Self) !void {
