@@ -71,4 +71,9 @@ pub const Broker = struct {
         const list = try topic.listConsumers();
         return list;
     }
+
+    pub fn replay(self: *Self, topic_name: []const u8, consumer_id: []const u8) !void {
+        const topic = self.topics.get(topic_name) orelse return BrokerError.TopicNotFound;
+        try topic.replay(consumer_id);
+    }
 };

@@ -10,6 +10,10 @@ pub const PersistenceMode = enum {
     file,
 };
 
+pub const TopicError = error{
+    ConsumerNotFound,
+};
+
 pub const Consumer = struct {
     id: []const u8,
     writer: *anyopaque,
@@ -32,6 +36,13 @@ pub const Consumer = struct {
         //     self.queue.allocator.destroy(m);
         // }
         self.queue.deinit();
+    }
+
+    pub fn flush(self: *Self) !void {
+        for (self.queue.items) |m| {
+            try self.writerFn(self.writer, m.*);
+        }
+        self.queue.clearRetainingCapacity();
     }
 };
 
@@ -134,7 +145,7 @@ pub const Topic = struct {
         msgPtr.* = msg;
         try self.messages.append(msgPtr);
         for (self.consumers.items) |c| {
-            try c.writerFn(c.writer, msg);
+            // try c.writerFn(c.writer, msg);
             try c.queue.append(msgPtr);
         }
         if (self.persistence == .file) {
@@ -147,6 +158,24 @@ pub const Topic = struct {
                 defer self.allocator.free(to_write);
                 try f.writeAll(to_write);
             }
+        }
+    }
+
+    pub fn flushAll(self: *@This()) !void {
+        for (self.consumers.items) |c| {
+            try c.flush();
+        }
+    }
+
+    pub fn replay(self: *@This(), consumer_id: []const u8) !void {
+        const consumer = for (self.consumers.items) |c| {
+            if (std.mem.eql(u8, consumer_id, c.id)) {
+                break c;
+            }
+        } else return error.ConsumerNotFound;
+
+        for (self.messages.items) |m| {
+            try consumer.writerFn(consumer.writer, m.*);
         }
     }
 };

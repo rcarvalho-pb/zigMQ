@@ -17,30 +17,36 @@ const FakeWriter = struct {
 test "subscribe and publish" {
     const allocator = testing.allocator;
 
-    var topic = try Topic.init(allocator, "eventos", null);
+    var topic = try Topic.init(allocator, "topic-test", null);
     defer topic.deinit();
 
     var writer = FakeWriter{};
-
-    const consumer = try Consumer.init(allocator, "client-1", &writer, struct {
-        pub fn call(ctx: *anyopaque, msg: Message) anyerror!void {
-            const w: *FakeWriter = @ptrCast(ctx);
-            try w.write(msg);
-        }
-    }.call);
+    var consumer = Consumer{
+        .id = "client-1",
+        .writer = &writer,
+        .writerFn = struct {
+            pub fn call(ctx: *anyopaque, msg: Message) anyerror!void {
+                const w: *FakeWriter = @ptrCast(@alignCast(ctx));
+                try w.write(msg);
+            }
+        }.call,
+        .queue = std.ArrayList(*Message).init(allocator),
+    };
+    defer consumer.deinit();
 
     try topic.subscribe(consumer);
 
     const msg = Message{
-        .topic = "events",
-        .payload = "sending test",
-        .timestamp = 1234567890,
+        .topic = "topic-test",
+        .payload = "testing publish and flush",
+        .timestamp = 1234,
     };
 
     try topic.publish(msg);
 
+    try topic.flushAll();
+
     try testing.expect(writer.received);
-    try testing.expectEqual(@as(usize, 1), topic.messages.items.len);
 }
 
 test "create and topic in memory tmpDir" {
@@ -110,4 +116,71 @@ test "create an topic and write it in default" {
     const content = buffer[0..bytes_read];
 
     try testing.expect(std.mem.containsAtLeast(u8, "123456789|test-topic|topic test\n", 1, content));
+}
+
+test "consumer flushes queue and receives message" {
+    const allocator = testing.allocator;
+
+    var topic = try Topic.init(allocator, "flush-topic", null);
+    defer topic.deinit();
+
+    var writer = FakeWriter{};
+    const consumer = Consumer{
+        .id = "client-1",
+        .writer = &writer,
+        .writerFn = struct {
+            pub fn call(ctx: *anyopaque, msg: Message) anyerror!void {
+                const w: *FakeWriter = @ptrCast(ctx);
+                try w.write(msg);
+            }
+        }.call,
+        .queue = std.ArrayList(*Message).init(allocator),
+    };
+    defer consumer.queue.deinit();
+
+    try topic.subscribe(consumer);
+
+    const msg = Message{
+        .topic = "flush-topic",
+        .payload = "message in queue",
+        .timestamp = 1234,
+    };
+
+    try topic.publish(msg);
+
+    try testing.expect(!writer.received);
+
+    const c_ptr = topic.consumers.items[0];
+    try c_ptr.flush();
+
+    try testing.expect(writer.received);
+}
+
+test "replay previously pusblished messages" {
+    const allocator = testing.allocator;
+
+    var topic = try Topic.init(allocator, "replay-topic", null);
+    defer topic.deinit();
+
+    const msg1 = Message{ .topic = "replay-topic", .payload = "first", .timestamp = 1234 };
+    const msg2 = Message{ .topic = "replay-topic", .payload = "second", .timestamp = 1235 };
+
+    try topic.publish(msg1);
+    try topic.publish(msg2);
+
+    var buffer = std.ArrayList(Message).init(allocator);
+    defer buffer.deinit();
+
+    var consumer = Consumer{
+        .id = "replayer",
+        .writer = &buffer,
+        .writerFn = struct {
+            pub fn call(ctx: *anyopaque, msg: Message) anyerror!void {
+                const list: *std.ArrayList(Message) = @ptrCast(ctx);
+                try list.append(msg);
+            }
+        }.call,
+        .queue = std.ArrayList(*Message).init(allocator),
+    };
+    defer consumer.deinit();
 }

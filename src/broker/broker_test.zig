@@ -46,6 +46,7 @@ test "consumer can subscribe to multiple topics" {
     var it = broker.topics.iterator();
     while (it.next()) |entry| {
         try entry.value_ptr.*.publish(msg);
+        try entry.value_ptr.*.flushAll();
     }
 
     try testing.expectEqual(@as(i8, 2), writer.quantity);
@@ -82,7 +83,9 @@ test "broker publishes messages to a topic" {
     try broker.subscribe(topic_name, consumer);
     try broker.publish(topic_name, msg);
 
-    const topic = broker.topics.get(topic_name).?;
+    var topic = broker.topics.get(topic_name).?;
+
+    try topic.flushAll();
 
     try testing.expectEqualStrings(topic_name, topic.name);
     try testing.expectEqual(@as(i8, 1), writer.quantity);
