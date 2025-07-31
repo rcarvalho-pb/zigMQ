@@ -40,8 +40,8 @@ test "consumer can subscribe to multiple topics" {
     _ = try broker.createTopic("topic-1", null);
     _ = try broker.createTopic("topic-2", null);
 
-    try broker.subscribe("topic-1", consumer);
-    try broker.subscribe("topic-2", consumer);
+    try broker.subscribe("topic-1", consumer.*);
+    try broker.subscribe("topic-2", consumer.*);
 
     var it = broker.topics.iterator();
     while (it.next()) |entry| {
@@ -80,7 +80,7 @@ test "broker publishes messages to a topic" {
     };
 
     _ = try broker.createTopic(topic_name, null);
-    try broker.subscribe(topic_name, consumer);
+    try broker.subscribe(topic_name, consumer.*);
     try broker.publish(topic_name, msg);
 
     var topic = broker.topics.get(topic_name).?;
@@ -107,7 +107,7 @@ test "consumer can unsubscribe from topic" {
 
     const topic_name = "topic-unsub";
     _ = try broker.createTopic(topic_name, null);
-    try broker.subscribe(topic_name, consumer);
+    try broker.subscribe(topic_name, consumer.*);
     try broker.unsubscribe(topic_name, consumer.id);
 
     const msg = Message{
@@ -138,8 +138,8 @@ test "list topics and consumers" {
     _ = try broker.createTopic("topic-a", null);
     _ = try broker.createTopic("topic-b", null);
 
-    try broker.subscribe("topic-a", consumer);
-    try broker.subscribe("topic-b", consumer);
+    try broker.subscribe("topic-a", consumer.*);
+    try broker.subscribe("topic-b", consumer.*);
 
     const topics = try broker.listTopics();
     defer topics.deinit();

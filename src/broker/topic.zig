@@ -12,13 +12,15 @@ pub const PersistenceMode = enum {
 
 pub const TopicError = error{
     ConsumerNotFound,
+    TopicNotFound,
 };
 
 pub const Consumer = struct {
+    allocator: Allocator,
     id: []const u8,
     writer: *anyopaque,
     writerFn: *const fn (ctx: *anyopaque, msg: Message) anyerror!void,
-    queue: ArrayList(*Message),
+    queues: std.StringHashMap(std.ArrayList(*Message)),
 
     const Self = @This();
 
@@ -27,25 +29,46 @@ pub const Consumer = struct {
         errdefer allocator.destroy(self);
 
         self.* = Consumer{
+            .allocator = allocator,
             .id = id,
             .writer = writer,
             .writerFn = writerFn,
-            .queue = std.ArrayList(*Message).init(allocator),
+            .queue = std.StringHashMap(std.ArrayList(*Message)).init(allocator),
         };
 
         return self;
     }
 
-    pub fn deinit(self: *Self, allocator: Allocator) void {
-        self.queue.deinit();
-        allocator.destroy(self);
+    pub fn deinit(self: *Self) void {
+        var it = self.queues.iterator();
+        while (it.next()) |entry| {
+            // for (entry.value_ptr.items) |msg| {
+            //     try self.allocator.destroy(msg);
+            // }
+            entry.value_ptr.deinit();
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.queues.deinit();
     }
 
-    pub fn flush(self: *Self) !void {
-        for (self.queue.items) |m| {
-            try self.writerFn(self.writer, m.*);
+    pub fn flush(self: *Self, topic_name: []const u8) !void {
+        if (self.queues.get(topic_name)) |queue| {
+            for (queue.items) |m| {
+                try self.writerFn(self.writer, m.*);
+            }
+        } else return TopicError.TopicNotFound;
+    }
+
+    pub fn getQueueForTopic(self: *Self, topic_name: []const u8) !*std.ArrayList(*Message) {
+        const queue_ptr = self.queues.getPtr(topic_name);
+        if (queue_ptr) |existing| {
+            return existing;
         }
-        self.queue.clearRetainingCapacity();
+
+        const new_queue = std.ArrayList(*Message).init(self.allocator);
+        errdefer new_queue.deinit();
+        try self.queues.put(try self.allocator.dupe(u8, topic_name), new_queue);
+        return self.queues.getPtr(topic_name).?;
     }
 };
 
@@ -121,7 +144,7 @@ pub const Topic = struct {
 
     pub fn subscribe(self: *@This(), consumer: Consumer) !void {
         const consumerPtr = try self.allocator.create(Consumer);
-        consumerPtr.* = try Consumer.init(self.allocator, consumer.id, consumer.writer, consumer.writerFn);
+        consumerPtr.* = consumer;
         try self.consumers.append(consumerPtr);
     }
 
@@ -148,8 +171,8 @@ pub const Topic = struct {
         msgPtr.* = msg;
         try self.messages.append(msgPtr);
         for (self.consumers.items) |c| {
-            // try c.writerFn(c.writer, msg);
-            try c.queue.append(msgPtr);
+            var queue = try c.getQueueForTopic(self.name);
+            try queue.append(msgPtr);
         }
         if (self.persistence == .file) {
             if (self.file) |f| {

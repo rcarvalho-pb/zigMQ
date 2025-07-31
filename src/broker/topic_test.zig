@@ -32,7 +32,7 @@ test "subscribe and publish" {
         }.call,
         .queue = std.ArrayList(*Message).init(allocator),
     };
-    defer consumer.deinit();
+    defer consumer.deinit(allocator);
 
     try topic.subscribe(consumer);
 
@@ -185,7 +185,7 @@ test "replay previously pusblished messages" {
         }.call,
         .queue = std.ArrayList(*Message).init(allocator),
     };
-    defer consumer.deinit();
+    defer consumer.deinit(allocator);
 
     try topic.subscribe(consumer);
     try topic.replay("replayer");
@@ -193,4 +193,35 @@ test "replay previously pusblished messages" {
     try testing.expectEqual(@as(usize, 2), buffer.items.len);
     try testing.expectEqualStrings("first", buffer.items[0].payload);
     try testing.expectEqualStrings("second", buffer.items[1].payload);
+}
+
+test "flush per consumer works correctly" {
+    const allocator = testing.allocator;
+
+    var topic = try Topic.init(allocator, "flush-test", null);
+    defer topic.deinit();
+
+    const msg = Message{
+        .topic = "flush-test",
+        .payload = "msg",
+        .timestamp = 1234,
+    };
+
+    var received = false;
+
+    var consumer = try Consumer.init(allocator, "client-1", &received, struct {
+        pub fn call(ctx: *anyopaque, message: Message) anyerror!void {
+            _ = message;
+            const ptr: *bool = @ptrCast(@alignCast(ctx));
+            ptr.* = true;
+        }
+    }.call);
+    defer consumer.deinit(allocator);
+
+    try topic.subscribe(consumer.*);
+    try topic.publish(msg);
+
+    try testing.expect(!received);
+    try consumer.flush();
+    try testing.expect(received);
 }
